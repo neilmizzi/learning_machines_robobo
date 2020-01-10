@@ -19,8 +19,8 @@ def terminate_program(signal_number, frame):
 def main():
     signal.signal(signal.SIGINT, terminate_program)
 
-    rob = robobo.HardwareRobobo(camera=True).connect(address="10.15.3.48")
-    #rob = robobo.SimulationRobobo().connect(address='172.20.10.5', port=19997)
+    # rob = robobo.HardwareRobobo(camera=True).connect(address="172.20.10.5")
+    rob = robobo.SimulationRobobo().connect(address='130.37.122.43', port=19997)
 
     # rob.play_simulation()
 
@@ -29,29 +29,24 @@ def main():
         back_sensors = all_sensor_info[range(0, 3)]
         front_sensors = all_sensor_info[range(3, 6)]
         if direction == 'front':
-            return np.max(front_sensors)
+            return front_sensors
         elif direction == 'back':
-            return np.max(back_sensors)
+            return back_sensors
         else:
             raise Exception('Invalid direction')
 
     def move_left():
-        rob.move(-15, 15, 10)
+        rob.move(20, -20, 2000)
 
     def move_right():
-        rob.move(15, -15, 10)
+        rob.move(-20, 20, 2000)
 
     def go_straight():
-        rob.move(10, 10, 10)
-
-    def move_back():
-        rob.move(-5, -5, 10)
+        rob.move(20, 20, 2000)
 
     # Following code moves the robot
-    for i in range(500):
-        print(get_sensor_info('front'))
-        if get_sensor_info('front') >= 30:
-            move_back()
+    for i in range(50):
+        if get_sensor_info('front') != -np.inf:
             move_left()
         else:
             go_straight()
