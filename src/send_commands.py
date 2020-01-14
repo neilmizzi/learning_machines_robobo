@@ -3,13 +3,13 @@ from __future__ import print_function
 
 import time
 import numpy as np
+from numpy import inf
 
 import robobo
 import cv2
 import sys
 import signal
 import prey
-
 
 use_simulation = True
 speed = 5
@@ -24,44 +24,47 @@ def terminate_program(signal_number, frame):
 def main():
     signal.signal(signal.SIGINT, terminate_program)
 
-    rob = robobo.SimulationRobobo().connect(address='192.168.43.172', port=19997) if use_simulation \
-        else robobo.HardwareRobobo(camera=True).connect(address="192.168.43.187")
+    rob = robobo.SimulationRobobo().connect(address='130.37.120.225', port=19997) if use_simulation \
+        else robobo.HardwareRobobo(camera=True).connect(address="192.168.1.6")
 
     if use_simulation:
         rob.play_simulation()
 
     def get_sensor_info(direction):
-        all_sensor_info = np.array([0 if not x else x for x in np.array(rob.read_irs())]) if use_simulation \
+        #   TODO Fix Transformation
+        a = np.log(np.array(rob.read_irs())) / 10
+        all_sensor_info = np.array([0 if x == inf else 1 + (-x / 2) - 0.2 for x in a]) if use_simulation \
             else np.array(rob.read_irs()) / 200
-        print(all_sensor_info)
-        back_sensors = all_sensor_info[range(0, 4)]
-        front_sensors = all_sensor_info[range(4, 8)]
+        all_sensor_info[all_sensor_info == inf] = 0
+        #print(format(all_sensor_info))
+        # [0, 1, 2, 3, 4, 5, 6, 7]
         if direction == 'front':
-            return np.max(front_sensors)
+            return all_sensor_info[5]
         elif direction == 'back':
-            return np.max(back_sensors)
+            return all_sensor_info[1]
         elif direction == 'front_left':
-            return np.max(front_sensors[range(0, 2)])
+            return np.max(all_sensor_info[[6, 7]])
         elif direction == 'front_right':
-            return np.max(front_sensors[range(2, 4)])
+            return np.max(all_sensor_info[[3, 4]])
         elif direction == 'back_left':
-            return np.max(back_sensors[range(0, 2)])
+            return all_sensor_info[0]
         elif direction == 'back_right':
-            return np.max(back_sensors[range(2, 4)])
+            return all_sensor_info[2]
         else:
             raise Exception('Invalid direction')
 
-    def policy(s):  # To be replaced by Neural Network, this is static
-        if get_sensor_info('front_left') <= s \
-                and get_sensor_info('front_left') < get_sensor_info('front_right') \
-                and get_sensor_info('front') != 0:
-            return 'right'
-        elif get_sensor_info('front_right') <= s \
-                and get_sensor_info('front_right') < get_sensor_info('front_left') \
-                and get_sensor_info('front') != 0:
-            return 'left'
+    def static_policy(s):  # To be replaced by Neural Network, this is static
+        print('left: {:f}, right: {:f}'.format(get_sensor_info('front_left'),
+              get_sensor_info('front_right')))
+        if get_sensor_info('front_left') >= s \
+                and get_sensor_info('front_left') > get_sensor_info('front_right'):
+            take_action('right')
+
+        elif get_sensor_info('front_right') >= s \
+                and get_sensor_info('front_right') > get_sensor_info('front_left'):
+            take_action('left')
         else:
-            return 'straight'
+            take_action('straight')
 
     def reward():
         pass
@@ -73,23 +76,26 @@ def main():
             move_right()
         elif action == 'straight':
             go_straight()
+        elif action == 'back':
+            move_back()
 
     def move_left():
-        rob.move(-speed, speed, 500)
+        rob.move(-speed, speed, dist)
 
     def move_right():
-        rob.move(speed, -speed, 500)
+        rob.move(speed, -speed, dist)
 
     def go_straight():
-        rob.move(speed, speed, 500)
+        rob.move(speed, speed, dist)
 
     def move_back():
-        rob.move(-speed, -speed, 500)
+        rob.move(-speed, -speed, dist)
 
+    # TODO Replace with SARSA
     # Following code moves the robot
     for i in range(500000):
         # Q-Learning/SARSA goes here
-        take_action(policy(0.19))
+        take_action(static_policy(0.75))
 
     # Following code gets an image from the camera
     # image = rob.get_image_front()
