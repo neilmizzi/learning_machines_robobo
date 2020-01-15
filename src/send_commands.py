@@ -2,9 +2,12 @@
 from __future__ import print_function
 from __future__ import absolute_import, division, print_function, unicode_literals
 
+import os
 import time
 import numpy as np
 from numpy import inf, random
+
+import json
 
 import robobo
 import cv2
@@ -28,11 +31,8 @@ def terminate_program(signal_number, frame):
 def main():
     signal.signal(signal.SIGINT, terminate_program)
 
-    rob = robobo.SimulationRobobo('#0').connect(address='192.168.1.2', port=19997) if use_simulation \
+    rob = robobo.SimulationRobobo().connect(address='192.168.1.2', port=19997) if use_simulation \
         else robobo.HardwareRobobo(camera=True).connect(address="192.168.43.187")
-
-    if use_simulation:
-        rob.play_simulation()
 
     def get_sensor_info(direction):
         #   TODO Fix Transformation
@@ -81,7 +81,7 @@ def main():
     def move_back():
         rob.move(-speed, -speed, dist)
 
-    boundary = [0.6, 0.8] if not use_simulation else [0.75, 0.95]
+    boundary = [0.5, 0.8] if not use_simulation else [0.75, 0.95]
 
     # A static collision-avoidance policy
     def static_policy(s):
@@ -96,7 +96,11 @@ def main():
             take_action('straight')
 
     state_table = {}
-    epsilon = 0.3
+    if os.path.exists('./src/state_table.json'):
+        with open('./src/state_table.json') as f:
+            state_table = json.load(f)
+
+    epsilon = 0.1
 
     def epsilon_policy(s, epsilon):
         s = str(s)
@@ -114,7 +118,7 @@ def main():
         if epsilon > random.random():
             return random.choice([0, 1, 2])
         else:
-            print(state_table[s])
+            print(np.argmax(state_table[s]))
             return np.argmax(state_table[s])
 
     def take_action(action):
@@ -127,11 +131,14 @@ def main():
         # elif action == 'back':
         #     move_back()
 
-    def get_reward(current, new):
+    def get_reward(current, new, action):
         if current == 0 and new == 0:
-            return 0
+            return 0 if action == 0 else -0.2
         elif current == 0 and new == 1:
             return 2
+        elif current == 0 and new == 2:
+            print("jumpppp")
+            return -0.2
         elif current == 1 and new == 0:
             return 1
         elif current == 1 and new == 1:
@@ -158,38 +165,67 @@ def main():
             epsilon  : discount factor
             episodes : no. of episodes
             act_lim  : no. of actions robot takes before resetting space
+            qL       : True if you use Q-Learning
     """
-    def SARSA(alpha, epsilon):
-        terminate = False
-        for i in range(5):
+    def RL(alpha, lmb, episodes, act_lim, qL=False):
+        for i in range(episodes):
+            terminate = False
+            if use_simulation:
+                rob.play_simulation()
+
             current_state = make_discrete(get_sensor_info('all')[3:], boundary)
 
             if str(current_state) not in state_table.keys():
                 state_table[str(current_state)] = [0 for _ in range(3)]
-                action = epsilon_policy(current_state, epsilon)
+
+            action = epsilon_policy(current_state, epsilon)
             # initialise state if it doesn't exist, else retrieve the current q-value
+            x = 0
             while not terminate:
                 take_action(action)
                 new_state = make_discrete(get_sensor_info('all')[3:], boundary)
-                new_action = epsilon_policy(current_state, epsilon)
+
                 if str(new_state) not in state_table.keys():
                     state_table[str(new_state)] = [0 for _ in range(3)]
 
-                r = get_reward(max(current_state), max(new_state))
-                print("rrrrr", r)
+                new_action = epsilon_policy(new_state, epsilon)
 
-                state_table[str(current_state)][action] += \
-                    alpha * (r + epsilon *
-                             np.array(state_table[str(new_state)][new_action])
+                # Retrieve the max action if we use Q-Learning
+                max_action = np.max(new_state) if qL else new_action
+
+                # Get reward
+                r = get_reward(np.max(current_state), np.max(new_state), action)
+
+                # Update rule
+                print("r: ", r)
+                state_table[str(current_state)][action] += alpha * (r + (lmb *
+                             np.array(state_table[str(new_state)][max_action]))
                              - np.array(state_table[str(current_state)][action]))
-                if max(new_state) == 2:
+
+                # Stop episode if we get very close to an obstacle
+                if max(new_state) == 2 or x == act_lim-1:
+                    state_table[str(new_state)][new_action] = -10
                     terminate = True
                     print("done")
+                    with open('./src/state_table.json', 'w') as json_file:
+                        json.dump(state_table, json_file)
 
+                    if use_simulation:
+                        print("stopping the simulation")
+                        rob.stop_world()
+                        while not rob.is_sim_stopped():
+                            print("waiting for the simulation to stop")
+                        time.sleep(2)
+
+                # update current state and action
                 current_state = new_state
                 action = new_action
 
-    SARSA(0.9, 0.9)
+                # increment action limit counter
+                x += 1
+
+    # alpha, gamma, episodes, actions per episode
+    RL(0.9, 0.9, 3, 20, qL=True)
 
     # Following code gets an image from the camera
     # image = rob.get_image_front()
@@ -203,16 +239,8 @@ def main():
     #     print("ROB Irs: {}".format(np.log(np.array(rob.read_irs())) / 10))
     #     time.sleep(0.1)
 
-    if use_simulation:
-        # pause the simulation and read the collected food
-        rob.pause_simulation()
-
-        # Stopping the simulation resets the environment
-        rob.stop_world()
-
     pprint(state_table)
 
 
 if __name__ == "__main__":
     main()
-

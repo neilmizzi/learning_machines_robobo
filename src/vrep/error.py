@@ -28,7 +28,7 @@ class VrepApiError(Exception):
         super(self.__class__, self).__init__(message)
 
 
-def unwrap_vrep(result):
+def unwrap_vrep(result, ignore_novalue_error=False):
     if type(result) is tuple:
         ret_code = result[0]
         result = result[1:]
@@ -36,6 +36,9 @@ def unwrap_vrep(result):
             result = result[0]
 
         if ret_code > 0:
-            raise VrepApiError(ret_code)
+            if ignore_novalue_error and ret_code == simx_return_novalue_flag:
+                print("ignoring value")
+            else:
+                raise VrepApiError(ret_code)
 
         return result
