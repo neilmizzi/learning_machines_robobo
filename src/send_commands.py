@@ -31,11 +31,10 @@ def terminate_program(signal_number, frame):
 def main():
     signal.signal(signal.SIGINT, terminate_program)
 
-    rob = robobo.SimulationRobobo().connect(address='192.168.1.2', port=19997) if use_simulation \
+    rob = robobo.SimulationRobobo().connect(address='172.17.0.1', port=19997) if use_simulation \
         else robobo.HardwareRobobo(camera=True).connect(address="192.168.43.187")
 
     def get_sensor_info(direction):
-        #   TODO Fix Transformation
         a = np.log(np.array(rob.read_irs())) / 10
         all_sensor_info = np.array([0 if x == inf else 1 + (-x / 2) - 0.2 for x in a]) if use_simulation \
             else np.array(np.log(rob.read_irs())) / 10
@@ -100,8 +99,6 @@ def main():
         with open('./src/state_table.json') as f:
             state_table = json.load(f)
 
-    epsilon = 0.1
-
     def epsilon_policy(s, epsilon):
         s = str(s)
         # epsilon greedy
@@ -118,7 +115,6 @@ def main():
         if epsilon > random.random():
             return random.choice([0, 1, 2])
         else:
-            print(np.argmax(state_table[s]))
             return np.argmax(state_table[s])
 
     def take_action(action):
@@ -137,7 +133,6 @@ def main():
         elif current == 0 and new == 1:
             return 2
         elif current == 0 and new == 2:
-            print("jumpppp")
             return -0.2
         elif current == 1 and new == 0:
             return 1
@@ -162,12 +157,13 @@ def main():
     """
     REINFORCEMENT LEARNING PROCESS
     INPUT:  alpha    : learning rate
-            epsilon  : discount factor
+            gamma    : discount factor
             episodes : no. of episodes
-            act_lim  : no. of actions robot takes before resetting space
+            act_lim  : no. of actions robot takes before ending episode
             qL       : True if you use Q-Learning
     """
-    def RL(alpha, lmb, episodes, act_lim, qL=False):
+
+    def rl(alpha, gamma, epsilon, episodes, act_lim, qL=False):
         for i in range(episodes):
             terminate = False
             if use_simulation:
@@ -191,19 +187,21 @@ def main():
                 new_action = epsilon_policy(new_state, epsilon)
 
                 # Retrieve the max action if we use Q-Learning
-                max_action = np.max(new_state) if qL else new_action
+                max_action = np.argmax(new_state) if qL else new_action
 
                 # Get reward
                 r = get_reward(np.max(current_state), np.max(new_state), action)
 
                 # Update rule
                 print("r: ", r)
-                state_table[str(current_state)][action] += alpha * (r + (lmb *
-                             np.array(state_table[str(new_state)][max_action]))
+                state_table[str(current_state)][action] += \
+                    alpha * (r + (gamma *
+                                  np.array(
+                                      state_table[str(new_state)][max_action]))
                              - np.array(state_table[str(current_state)][action]))
 
                 # Stop episode if we get very close to an obstacle
-                if max(new_state) == 2 or x == act_lim-1:
+                if max(new_state) == 2 or x == act_lim - 1:
                     state_table[str(new_state)][new_action] = -10
                     terminate = True
                     print("done")
@@ -224,20 +222,8 @@ def main():
                 # increment action limit counter
                 x += 1
 
-    # alpha, gamma, episodes, actions per episode
-    RL(0.9, 0.9, 3, 20, qL=True)
-
-    # Following code gets an image from the camera
-    # image = rob.get_image_front()
-    # cv2.imwrite("../test_pictures.png", image)
-    #
-    # time.sleep(0.1)
-
-    # IR reading
-
-    # for i in range(1000000):
-    #     print("ROB Irs: {}".format(np.log(np.array(rob.read_irs())) / 10))
-    #     time.sleep(0.1)
+    # alpha, gamma, epsilon, episodes, actions per episode
+    rl(0.4, 0.9, 0.1, 100, 500, qL=True)
 
     pprint(state_table)
 
