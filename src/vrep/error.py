@@ -35,10 +35,8 @@ def unwrap_vrep(result, ignore_novalue_error=False):
         if len(result) == 1:
             result = result[0]
 
-        if ret_code > 0:
-            if ignore_novalue_error and ret_code == simx_return_novalue_flag:
-                print("ignoring value")
-            else:
+        if ret_code > 0 and \
+            not(ignore_novalue_error and ret_code == simx_return_novalue_flag):
                 raise VrepApiError(ret_code)
 
         return result
