@@ -3,6 +3,7 @@ from __future__ import print_function
 from __future__ import absolute_import, division, print_function, unicode_literals
 import os
 import time
+import socket
 import numpy as np
 from numpy import inf, random
 import pickle
@@ -16,14 +17,16 @@ import prey
 
 import collections
 
-use_simulation = True
+use_simulation = False
 run_test = True
 speed = 20 if use_simulation else 50
-dist = 500 if use_simulation else 400
+dist = 500 if use_simulation else 500
 rewards = [0]
 fitness = list()
-MIN_REWARD = -2.5
+MIN_REWARD = -5
 MAX_REWARD = 30
+MIN_TIMESTEPS = 0
+MAX_TIMESTEPS = 200
 
 
 def terminate_program(signal_number, frame):
@@ -36,13 +39,14 @@ def main():
 
     virtual_ip = '192.168.1.2'
     robot_ip = '10.15.3.48'
+    robot_prey =  '10.15.3.60'
 
     rob = robobo.SimulationRobobo().connect(address=virtual_ip, port=19997) if use_simulation \
         else robobo.HardwareRobobo(camera=True).connect(address=robot_ip)
     rob.set_phone_tilt(45, 100) if use_simulation else rob.set_phone_tilt(100, 100)
 
     state_table = {}
-    q_table_file = './src/state_table.json'
+    q_table_file = 'src/task3_results/state_table_e0.08_exp_1.json'
     if os.path.exists(q_table_file):
         with open(q_table_file) as g:
             state_table = json.load(g)
@@ -85,10 +89,10 @@ def main():
     # controller is the q values: the boundary for every sensor.
 
     def move_left():
-        rob.move(-speed, speed, dist)
+        rob.move(-speed/2, speed/2, dist) if not use_simulation else rob.move(-speed, speed, dist)
 
     def move_right():
-        rob.move(speed, -speed, dist)
+        rob.move(speed/2, -speed/2, dist) if not use_simulation else rob.move(speed, -speed, dist)
 
     def go_straight():
         rob.move(speed, speed, dist)
@@ -96,8 +100,8 @@ def main():
     def move_back():
         rob.move(-speed, -speed, dist)
 
-    boundary_sensor = [0.6, 0.8] if not use_simulation else [0.5, 0.95]
-    boundaries_color = [0.01, 0.2] if not use_simulation else [0.001, 0.4]
+    boundary_sensor = [0.4, 0.8] if not use_simulation else [0.5, 0.95]
+    boundaries_color = [0.001, 0.2] if not use_simulation else [0.001, 0.4]
 
     # A static collision-avoidance policy
     def static_policy(color_info):
@@ -263,7 +267,8 @@ def main():
 
     def normalize(reward, old_min, old_max, new_min=-1, new_max=1):
         return ((reward - old_min) / (old_max - old_min)) * (new_max - new_min) + new_min
-
+    
+    """
     # def run_static(lim, no_blocks=0):
     #     for i in range(lim):
     #         if use_simulation:
@@ -308,8 +313,9 @@ def main():
     #
     #         current_state = new_state
     #         current_color_info = new_color_info
+    """
 
-    def rl(alpha, gamma, epsilon, episodes, act_lim, qL=False):
+    def rl(alpha, gamma, epsilon, episodes, act_lim, exp, qL=False):
 
         fitness = list()
         rewards = [0]
@@ -317,11 +323,14 @@ def main():
         for i in range(episodes):
             print('Episode ' + str(i))
             terminate = False
+            prey_robot = []
             if use_simulation:
                 rob.play_simulation()
                 prey_robot = robobo.SimulationRoboboPrey().connect(address=virtual_ip, port=19989)
-                prey_controller = prey.Prey(robot=prey_robot, level=2)
-                prey_controller.start()
+            if not use_simulation:
+                prey_robot = robobo.HardwareRobobo().connect(address=robot_prey)
+            prey_controller = prey.Prey(robot=prey_robot, level=2) if use_simulation else prey.Prey(robot=prey_robot, level=4)
+            prey_controller.start()
             current_color_space = get_color_info()
             current_sensor_info = get_sensor_info('front_3')
             current_state = make_discrete(current_sensor_info, boundary_sensor, current_color_space,
@@ -361,8 +370,8 @@ def main():
                 print("State and obtained Reward: ", new_state, r)
 
                 norm_r = normalize(r, MIN_REWARD, MAX_REWARD)
-                max_sensor_val = np.max(new_sensor_info)
-                fitness.append(norm_r * (0.1 + max_sensor_val))
+                norm_steps = normalize(x, MIN_TIMESTEPS+0.01, MAX_TIMESTEPS)
+                fitness.append(norm_r / norm_steps)
 
                 # Update rule
                 if not run_test:
@@ -375,12 +384,12 @@ def main():
 
                 # Stop episode if we get very close to an obstacle
                 if (max(new_state[:3]) == 2 and max(new_state[3:]) != 2 and use_simulation) or x == act_lim - 1:
-                    state_table[str(new_state)][new_action] = -10
+                    # state_table[str(new_state)][new_action] = -10
                     terminate = True
                     print("done")
                     if not run_test:
                         print('writing json')
-                        with open(q_table_file, 'w') as json_file:
+                        with open('./src/task3_results/state_table_e'+str(epsilon)+'_exp_'+str(exp)+'.json', 'wb') as json_file:
                             json.dump(state_table, json_file)
 
                     if use_simulation:
@@ -405,25 +414,22 @@ def main():
         return fitness, rewards
 
 
-    # epsilons = [0.01, 0.08, 0.22]
-    # gammas = [0.9]
-    # param_tuples = [(epsilon, gamma) for epsilon in epsilons for gamma in gammas]
-    experiments = 1 if not run_test else 1
-    actions = 200 if not run_test else 10000
-    eps = 30 if not run_test else 1
-    epsilons = [0.08]
+    epsilons = [0.01, 0.08, 0.22]   if not run_test else [0]
+    experiments = 2                 if not run_test else 1
+    actions = 200                   if not run_test else 10000
+    eps = 30                        if not run_test else 1
     for epsilon in epsilons:
 
         for run in range(experiments):
             print('======= RUNNING FOR epsilon ', epsilon, ' , run ', run)
-            fitness, rewards = rl(0.9, 0.9, epsilon, eps, actions,
+            fitness, rewards = rl(0.9, 0.9, epsilon, eps, actions, run,
                                   qL=True)  # alpha, gamma, epsilon, episodes, actions per episode
             if not run_test:
-                file_name_rewards = './src/rewards_epsilon' + str(epsilon) + '_run' + str(run) + '.csv'
+                file_name_rewards = './src/task3_results/rewards_epsilon' + str(epsilon) + '_run' + str(run) + '.csv'
                 with open(file_name_rewards, 'wb') as f:
                     pickle.dump(rewards, f)
 
-                file_name_fitness = './src/fitness_epsilon' + str(epsilon) + '_run' + str(run) + '.csv'
+                file_name_fitness = './src/task3_results/fitness_epsilon' + str(epsilon) + '_run' + str(run) + '.csv'
                 with open(file_name_fitness, 'wb') as f:
                     pickle.dump(fitness, f)
 

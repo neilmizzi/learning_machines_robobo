@@ -100,8 +100,8 @@ class Prey(StoppableThread):
                 speed_right = random.uniform(-turning_speed, turning_speed)
                 speed_left = random.uniform(-turning_speed, turning_speed)
                 for i in range(3):
-                    self._robot.move(left=speed_right, right=speed_left, millis=200)
-            self._robot.move(left=speed_right, right=speed_left, millis=200)
+                    self._robot.move(speed_right, speed_left, 200)
+            self._robot.move(speed_right, speed_left, 200)
             sensors = self._sensor_better_reading(self._robot.read_irs())
             # self.log.debug(sensors)
             # print(sensors)
